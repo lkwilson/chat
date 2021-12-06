@@ -14,12 +14,12 @@ from typing import Any, Dict, List
 
 @dataclass
 class ChatMsg:
-  time: datetime
   user: str
   msg: bytes
 
   def __post_init__(self):
-    self.msg.rstrip(b'\n')
+    self.msg = self.msg.rstrip(b'\n')
+    logging.debug("New Msg Created: %s", self)
 
 @dataclass
 class Peer:
@@ -39,14 +39,19 @@ class ChatServer:
 ''' SERVER '''
 
 async def send_msg(peer: Peer, msg_bytes: bytes):
+  logging.debug("Sending msg to peer %s with length %d", peer.client_id, len(msg_bytes))
   try:
     peer.writer.write(msg_bytes)
     await peer.writer.drain()
   except Exception:
     logging.info("Failed to send msg to client: %s", peer.client_id, exc_info=True)
+  logging.debug("Done sending msg to peer %s with length %d", peer.client_id, len(msg_bytes))
+
+def user_prompt(peer: Peer):
+  return "[{}]> ".format(peer.display_name).encode('utf-8')
 
 def format_msg(msg: ChatMsg):
-  return "[{}@{}]> ".format(msg.user, msg.time).encode('utf-8') + msg.msg
+  return "[{}]> ".format(msg.user).encode('utf-8') + msg.msg
 
 async def publish_msg(chat_server: ChatServer, client_id: uuid.UUID, msg: ChatMsg):
   msg_bytes = b'\n' + format_msg(msg)
@@ -54,7 +59,8 @@ async def publish_msg(chat_server: ChatServer, client_id: uuid.UUID, msg: ChatMs
   for peer_id, peer in chat_server.peers.items():
     if peer_id == client_id:
       continue
-    tasks.add(asyncio.create_task(send_msg(peer, msg_bytes)))
+    peer_msg_bytes = msg_bytes + b'\n' + user_prompt(peer)
+    tasks.add(asyncio.create_task(send_msg(peer, peer_msg_bytes)))
   return tasks
 
 
@@ -72,8 +78,7 @@ async def handle_new_user(chat_server: ChatServer, client_id: uuid.UUID):
     if chat_server.messages:
       writer.write(b"Chat history:\n")
       for msg in chat_server.messages[-10:]:
-        logging.info("[%s] User Msg: %s", format_msg(msg))
-        writer.write(format_msg(msg) + '\n')
+        writer.write(format_msg(msg) + b'\n')
 
     if len(chat_server.peers) > 1:
       writer.write(b"Online Users:\n")
@@ -97,7 +102,7 @@ async def handle_new_user(chat_server: ChatServer, client_id: uuid.UUID):
         except Exception:
           logging.debug("[%s] Tried sending one last new line to client, but failed", client_id, exc_info=True)
         break
-      msg = ChatMsg(datetime.now(), display_name, line)
+      msg = ChatMsg(display_name, line)
       chat_server.messages.append(msg)
       publishing_msgs.update(await publish_msg(chat_server, client_id, msg))
       if publishing_msgs:
