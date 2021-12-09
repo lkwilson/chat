@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime
 from asyncio.streams import StreamReader, StreamWriter
@@ -31,6 +32,7 @@ class Peer:
 
 @dataclass
 class ChatServer:
+  file_port: int
   messages: list[ChatMsg] = field(default_factory=list)
   peers: dict[str, Peer] = field(default_factory=dict)
 
@@ -73,6 +75,7 @@ async def handle_new_user(chat_server: ChatServer, client_id: uuid.UUID):
 
   try:
     writer.write("Welcome to the chat server {}!\n".format(display_name).encode('utf-8'))
+    writer.write("The file server is located on port {}!\n".format(chat_server.file_port).encode('utf-8'))
 
     if chat_server.messages:
       writer.write(b"Chat history:\n")
@@ -135,25 +138,51 @@ async def client_connected(chat_server: ChatServer, reader: StreamReader, writer
     del chat_server.peers[client_id]
     writer.close()
 
+@dataclass
+class FileServer:
+  file: str
 
-async def start_server(port: int):
+async def file_client_connected(file_server: FileServer, reader: StreamReader, writer: StreamWriter):
+  writer.write("Sorry this doesn't actually work\n")
+  await writer.drain()
+  writer.close()
+
+async def start_server(port: int, file_port: int, file: str):
   logging.info("Starting server on port: %d", port)
 
-  chat_server = ChatServer()
+  chat_server = ChatServer(file_port=file_port)
+  file_server = FileServer(file=file)
 
   def handle_client_connected(reader, writer):
     return client_connected(chat_server, reader, writer)
 
+  def handle_file_client_connected(reader, writer):
+    return file_client_connected(file_server, reader, writer)
+
   async with await asyncio.start_server(handle_client_connected, port=port) as server:
-    await server.serve_forever()
+    async with await asyncio.start_server(handle_file_client_connected, port=file_port, file=file) as file_server:
+      server_task = asyncio.create_task(server.serve_forever())
+      file_server_task = asyncio.create_task(file_server.serve_forever())
+
+      try:
+        await asyncio.gather(server.serve_forever(), file_server.serve_forever(), return_exceptions=True)
+      except asyncio.CancelledError:
+        try:
+          await server_task
+        except Exception:
+          logging.warning("Server ended with an exception:", exc_info=True)
+        try:
+          await file_server_task
+        except Exception:
+          logging.warning("File server ended with an exception:", exc_info=True)
 
 
 ''' STARTUP '''
 
-def run(port: int):
+def run(port: int, file_port: int, file: str):
   port = int(port)
   try:
-    asyncio.run(start_server(port))
+    asyncio.run(start_server(port, file_port, file))
     return 0
   except KeyboardInterrupt:
     logging.info("Server was killed by SIGINT")
@@ -187,11 +216,23 @@ def setup_logger(verbose: int):
 def main():
   parser = argparse.ArgumentParser(description='A simple chat server')
   parser.add_argument('port', type=int, help='The port to host the server on')
+  parser.add_argument('file-port', type=int, help='The port to host the file server on')
+  parser.add_argument('file', type=str, help='The file to use to store uploaded files')
   parser.add_argument('--verbose', '-v', action='count', default=0)
   args = parser.parse_args()
 
   setup_logger(args.verbose)
-  return run(args.port)
+  if os.path.isfile(args.file):
+    logging.error("The file specified already exists: %s", args.file)
+    return 1
+  try:
+    with open(args.file, 'w'):
+      pass
+  except Exception:
+    logging.error("Unable to open the upload file for writing. This is a requirement.", exc_info=True)
+    return 1
+
+  return run(args.port, args.file_port, args.file)
 
 if __name__ == '__main__':
   sys.exit(main())
