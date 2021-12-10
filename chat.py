@@ -1,4 +1,3 @@
-import time
 import uuid
 from datetime import datetime
 from asyncio.streams import StreamReader, StreamWriter
@@ -158,7 +157,7 @@ def run(port: int):
     return 0
   except KeyboardInterrupt:
     logging.info("Server was killed by SIGINT")
-  except:
+  except BaseException:
     logging.warning("Server exited with an uncaught exception!", exc_info=True)
     return 1
 
