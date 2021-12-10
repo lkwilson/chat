@@ -7,7 +7,7 @@ import argparse
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 
 ''' DATA CLASSES '''
@@ -32,8 +32,8 @@ class Peer:
 
 @dataclass
 class ChatServer:
-  messages: List[ChatMsg] = field(default_factory=list)
-  peers: Dict[str, Peer] = field(default_factory=dict)
+  messages: list[ChatMsg] = field(default_factory=list)
+  peers: dict[str, Peer] = field(default_factory=dict)
 
 
 ''' SERVER '''
